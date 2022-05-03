@@ -24,7 +24,7 @@ Vite是一种新型的前端构建工具，是尤雨溪在开发Vue3.0的时候�
 
 传统的打包工具如`Webpack`是先解析依赖、打包构建再启动开发服务器，`Dev Server` 必须等待所有模块构建完成，当我们修改了 `bundle`模块中的一个子模块， 整个 `bundle` 文件都会重新打包然后输出。项目应用越大，启动时间越长。
 
-![esbuild](/Users/liluyao/Desktop/vite/images/bundle.png)
+![esbuild](./images/bundle.png)
 
 ### vite是怎么做的
 
@@ -40,7 +40,7 @@ Vite 以 [原生 ESM](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Gu
 
 
 
-![esbuild](/Users/liluyao/Desktop/vite/images/esm.png)
+![esbuild](./images/esm.png)
 
 
 
@@ -58,7 +58,7 @@ Vite 以 [原生 ESM](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Gu
 
 这是`Esbuild`首页的图。新一代的打包工具，提供了与`Webpack`、`Rollup`、`Parcel` 等工具相似的资源打包能力，但在时速上达到10～100倍的差距，耗时是`Webpack`2%~3%
 
-![esbuild](/Users/liluyao/Desktop/vite/images/esbuild.png)
+![esbuild](./images/esbuild.png)
 
 
 
