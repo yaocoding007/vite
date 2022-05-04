@@ -4,8 +4,7 @@
 
 1. vite是什么、解决了什么问题
 2. vite原理
-3. vite插件开发
-4. vite使用
+3. vite插件
 
 ## 
 
@@ -93,6 +92,110 @@ esbuild 号称是新一代的打包工具，提供了与`Webpack`、`Rollup`、`
 
 
 
+## roolup
+
+在生产环境下，Vite使用`Rollup`来进行打包
+
+
+
+`Rollup`是基于`ESM`的JavaScript打包工具。它将小文件打包成一个大文件或者更复杂的库和应用，打包既可用于浏览器和Node.js使用。 Rollup最显著的地方就是能让打包文件体积很小。相比其他JavaScript打包工具，Rollup总能打出更小，更快的包。因为`Rollup`基于`ESM`，比Webpack和Browserify使用的CommonJS模块机制更高效。
+
+
+
+## vite原理
+
+我们先看下vite在项目中的工作方式 拿一个demo项目来举例子
+
+```js
+// index.html
+ <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+ </body>
+
+// main.tsx
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+)
+```
+
+
+
+项目中分类两种依赖 
+
+1. `/srx/main.tsx`相对地址的源码 
+2. `import React from 'react'`非相对地址的依赖模块
+
+第二种`ESM`是不支持的 `import` 对应的路径只支持 `"/""./"`或者 `"../"` 开头的内容，直接使用模块名 `import`，会立即报错。 那vite的这么处理的呢 我们来看下请求
+
+
+
+![](./images/main.png)
+
+
+
+`react`被替换成了 `/node_modules/.vite/deps/react.js?v=c0a237c5`
+
+
+
+这就是vite的核心原理: `Vite`启动一个服务器拦截请求，并在后端进行相应的处理将项目中使用的文件通过简单的分解与整合，然后再以`ESM`格式返回返回给浏览器。
+
+
+
+1. 命令行启动服务`npm run dev`后，源码执行`cli.ts`，调用`createServer`方法，创建http服务，监听开发服务器端口。
+
+   ```js
+   const { createServer } = await import('./server')
+   try {
+       const server = await createServer({
+           root,
+           base: options.base,
+           ...
+       })
+       if (!server.httpServer) {
+           throw new Error('HTTP server not available')
+       }
+       await server.listen()
+   }
+   ```
+
+2. `createServer`方法的执行做了很多工作，如整合配置项、创建http服务 、创建`WebSocket`服务、创建源码的文件监听、插件执行、optimize优化等。
+
+   Vite劫持httpserver默认的listen，在监听端口前先执行预构建
+
+   ```js
+   // overwrite listen to init optimizer before server start
+       const listen = httpServer.listen.bind(httpServer)
+       httpServer.listen = (async (port: number, ...args: any[]) => {
+         if (!isOptimized) {
+           try {
+             await container.buildStart({})
+             initOptimizer()
+             isOptimized = true
+           } catch (e) {
+             httpServer.emit('error', e)
+             return
+           }
+         }
+         return listen(port, ...args)
+       }) as any
+   ```
+
+   
+
+3. Vite会首先根据本次运行的入口，去扫描其中的依赖，最终根据分析出来的依赖，使用esbuild打包成单文件的bundle，存在node_modules/.vite下，并且，浏览器会给这些第三方依赖设置强缓存，只有当缓存依赖发生改变时，才会重新去更新文件。
+
+4. 浏览器是无法直接解析tsx、vue文件的，所以Vite还需要做的一件事就是文件编译。当浏览器发起tsx、vue、ts等请求时，Vite会使用esbuild作为文件类型的解析器，最后将编译后的文件返回给浏览器。
+
+
+
 `为啥需要预编译`
 
 
@@ -115,58 +218,163 @@ esbuild 号称是新一代的打包工具，提供了与`Webpack`、`Rollup`、`
 
 再有就是去做模块化的兼容，对 `CommonJS` 模块进行分析，方便后面需要统一处理成浏览器可以执行的 `ES Module`。
 
-## roolup
-
-在生产环境下，Vite使用`Rollup`来进行打包
-
-
-
-`Rollup`是基于`ESM`的JavaScript打包工具。它将小文件打包成一个大文件或者更复杂的库和应用，打包既可用于浏览器和Node.js使用。 Rollup最显著的地方就是能让打包文件体积很小。相比其他JavaScript打包工具，Rollup总能打出更小，更快的包。因为`Rollup`基于`ESM`，比Webpack和Browserify使用的CommonJS模块机制更高效。
-
-
-
-## vite原理
-
-核心原理
-
-拦截浏览器对模块的请求并返回处理后的结果
-
-浏览器发起的第一个请求自然是请求 `localhost:3000/`，这个请求发送到 Vite 后端之后经过静态资源服务器的处理，会进而请求到 `index.html`，此时 Vite 就开始对这个请求做拦截和处理了。
-
-
-
-
-
-
-
 ## vite插件
 
-- `config`：可以在`Vite`被解析之前修改`Vite`的相关配置。钩子接收原始用户配置`config`和一个描述配置环境的变量`env`
+使用Vite插件可以扩展Vite能力，比如解析用户自定义的文件输入，在打包代码前转译代码，或者查找第三方模块。
 
-- `configResolved`：解析`Vite`配置后调用，配置确认
+##### 插件的形式
 
-- `configureserver`：主要用来配置开发服务器，为`dev-server`添加自定义的中间件
+`Vite`插件扩展自`Rollup`插件接口，只是额外多了一些`Vite`特有选项。
 
-- `transformindexhtml`：主要用来转换`index.html`，钩子接收当前的 `HTML` 字符串和转换上下文
+`Vite`插件是一个**拥有名称**、**创建钩子**(build hook)或**生成钩子**(output generate hook)**的对象**。
 
-- `handlehotupdate`：执行自定义`HMR`更新，可以通过`ws`往客户端发送自定义的事件
+```js
+export default {
+    name: 'demo-plugin',
+  	resolveId(id) {},
+  	load(id){},
+  	transform(code) {}
+}
 
-### 常用的钩子
+export default function (options) {
+  return {
+    name: 'demo-plugin',
+  	resolveId(id) {},
+  	load(id){},
+  	transform(code) {}
+  }
+}
+```
 
-- 服务启动时调用一次
-  - `options`: 获取、操纵`Rollup`选项
-  - `buildstart`：开始创建
+开发时，`Vite dev server`创建一个插件容器按照`Rollup`调用创建钩子的规则请求各个钩子函数。
 
-- 在每个传入模块请求时被调用
-  - `resolveId`: 创建自定义确认函数，可以用来定位第三方依赖
-  - `load`：可以自定义加载器，可用来返回自定义的内容
-  - `transform`：在每个传入模块请求时被调用，主要是用来转换单个模块
+#### 通用钩子
 
-- 服务关闭时调用一次
-  - `buildend`：在服务器关闭时被调用
-  - `closeBundle`
+下面钩子会在服务器启动时调用一次:
 
+- [`options`](https://link.juejin.cn?target=https%3A%2F%2Frollupjs.org%2Fguide%2Fen%2F%23options) 替换或操纵`rollup`选项
+- [`buildStart`](https://link.juejin.cn?target=https%3A%2F%2Frollupjs.org%2Fguide%2Fen%2F%23buildstart) 开始创建
 
+下面钩子每次有模块请求时都会被调用:
+
+- [`resolveId`](https://link.juejin.cn?target=https%3A%2F%2Frollupjs.org%2Fguide%2Fen%2F%23resolveid) 创建自定义确认函数，常用于定位第三方依赖
+- [`load`](https://link.juejin.cn?target=https%3A%2F%2Frollupjs.org%2Fguide%2Fen%2F%23load) 创建自定义加载函数，可用于返回自定义的内容
+- [`transform`](https://link.juejin.cn?target=https%3A%2F%2Frollupjs.org%2Fguide%2Fen%2F%23transform) 可用于转换已加载的模块内容
+
+下面钩子会在服务器关闭时调用一次:
+
+- [`buildEnd`](https://link.juejin.cn?target=https%3A%2F%2Frollupjs.org%2Fguide%2Fen%2F%23buildend)
+- [`closeBundle`](https://link.juejin.cn?target=https%3A%2F%2Frollupjs.org%2Fguide%2Fen%2F%23closebundle)
+
+#### 特有钩子
+
+- config: 修改Vite配置
+- configResolved：Vite配置确认
+- configureServer：用于配置dev server
+- transformIndexHtml：用于转换宿主页
+- handleHotUpdate：自定义HMR更新时调用
+
+#### 范例：钩子调用顺序测试
+
+```js
+
+export default function demoPlugin () {
+  // 定义vite插件唯一id
+  const virtualFileId = '@demo-plugin'
+  // 返回插件对象
+  return {
+    // 必须的，将会显示在 warning 和 error 中
+    name: 'vite-plugin',
+
+    // *以下钩子函数按照实际执行顺序排列*
+
+    /**
+     * config 可以在被解析之前修改 Vite 配置
+     * Vite独有钩子
+     * https://cn.vitejs.dev/guide/api-plugin.html#config
+     * @param config vite配置信息
+     * @param env 描述配置环境的变量
+     */
+    config: (config, env) => ({}),
+
+    /**
+     * configResolved 解析 Vite 配置后调用,使用这个钩子读取和存储最终解析的配置
+     * Vite独有钩子
+     * https://cn.vitejs.dev/guide/api-plugin.html#configresolved
+     * @param config vite配置信息
+     */
+    configResolved: config => ({}),
+
+    /**
+     * options 替换或操作传递给rollup.rollup()的选项
+     * 通用钩子
+     * https://rollupjs.org/guide/en/#options
+     * @param options rollup配置信息
+     */
+    options: options => ({}),
+
+    /**
+     * configureServer 用于配置开发服务器
+     * Vite独有钩子
+     * https://cn.vitejs.dev/guide/api-plugin.html#configureserver
+     * @param server ViteDevServer配置信息
+     * https://cn.vitejs.dev/guide/api-javascript.html#vitedevserver
+     */
+    configureServer: server => ({}),
+
+    /**
+     * buildStart 在每个rollup.rollup()构建时被调用
+     * 通用钩子
+     * https://rollupjs.org/guide/en/#buildstart
+     * @param options rollup配置信息
+     */
+    buildStart: options => ({}),
+
+    /**
+     * 此时 Vite dev server is running
+     */
+
+    /**
+     * transformIndexHtml 转换 index.html 的专用钩子
+     * Vite独有钩子
+     * https://cn.vitejs.dev/guide/api-plugin.html#transformindexhtml
+     * @param html html字符串
+     * @param ctx 转换上下文; 在开发期间会额外暴露ViteDevServer实例; 在构建期间会额外暴露Rollup输出的包
+     */
+    transformIndexHtml: (html, ctx) => ({}),
+
+    /**
+     * resolveId 用户自定义解析器
+     * 通用钩子 会在每个传入模块请求时被调用
+     * https://rollupjs.org/guide/en/#resolveid
+     * @param source 源导入者 例子: import { foo } from '../bar.js', '../bar.js' 为source
+     * @param importer 导入者所在文件绝对路径
+     */
+    resolveId: (source, importer) => ({}),
+
+    /**
+     * load 用户自定义加载器
+     * 通用钩子 会在每个传入模块请求时被调用
+     * https://rollupjs.org/guide/en/#load
+     * @param id 同resolveId source
+     */
+    load: id => ({}),
+
+    /**
+     * transform 可以用来转换单个模块
+     * 通用钩子 会在每个传入模块请求时被调用
+     * https://rollupjs.org/guide/en/#transform
+     * @param code 模块代码
+     * @param id 同resolveId source
+     */
+    transform: (code, id) => ({})
+
+  }
+}
+
+```
+
+#### 举例子 🌰 vite-plugin-env-command
 
 ```typescript
 /**
@@ -191,25 +399,46 @@ export default function CommandSetEnv(options: Options) {
 }
 ```
 
+#### [vite-plugin-vconsole](https://github.com/vadxq/vite-plugin-vconsole)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-[可以借鉴 预编译的部分 https://juejin.cn/post/6932367804108800007](https://juejin.cn/post/6932367804108800007) 
-
-[webpack 的 scope hoisting 是什么？](https://segmentfault.com/a/1190000018220850)
-
-
+```js
+export function viteVConsole(opt: viteVConsoleOptions): Plugin {
+  let viteConfig: ResolvedConfig;
+  return {
+    name: 'vite:vconsole',
+    
+    /**
+    	一个 Vite 插件可以额外指定一个 enforce 属性（类似于 webpack 加载器）来调整它的应用顺序。enforce 的值可以是pre 或 post。解析后的插件将按照以下顺序排列：
+      1. Alias
+      2. 带有 enforce: 'pre' 的用户插件
+      3. Vite 核心插件
+      4. 没有 enforce 值的用户插件
+      5. Vite 构建用的插件
+    	6.  带有 enforce: 'post' 的用户插件
+      7. Vite 后置构建插件（最小化，manifest，报告）
+    */
+    
+    enforce: 'pre',
+    configResolved(resolvedConfig) {
+      viteConfig = resolvedConfig;
+      isDev = viteConfig.command === 'serve';
+    },
+    transform(_source: string, id: string) {
+      if (entryPath.includes(id) && localEnabled && isDev) {
+        // serve dev
+        return `/* eslint-disable */;import VConsole from 'vconsole';new VConsole(${JSON.stringify(
+          config
+        )});/* eslint-enable */${_source}`;
+      }
+      if (entryPath.includes(id) && enabled && !isDev) {
+        // build prod
+        return `/* eslint-disable */;import VConsole from 'vconsole';new VConsole(${JSON.stringify(
+          config
+        )});/* eslint-enable */${_source}`;
+      }
+      return _source;
+    }
+  };
+}
+```
 
