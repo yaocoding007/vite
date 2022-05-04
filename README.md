@@ -7,9 +7,9 @@
 3. vite插件开发
 4. vite使用
 
-## 3w TO vite
+## 
 
-### vite是什么
+## vite是什么
 
 Vite是一种新型的前端构建工具，是尤雨溪在开发Vue3.0的时候诞生的。类似于`webpack+webpack-dev-server`。利用浏览器`ESM`特性导入组织代码，在服务端按需编译返回，完全跳过了打包这个概念；而生产环境则是利用`Rollup`作为打包工具，号称是下一代的前端构建工具。
 
@@ -20,13 +20,13 @@ Vite是一种新型的前端构建工具，是尤雨溪在开发Vue3.0的时候�
 * `通用的插件`在开发和构建之间共享 Rollup-superset 插件接口。
 * `完全类型化的API`灵活的 API 和完整的 TypeScript 类型。
 
-### 我们为什么需要vite
+## 我们为什么需要vite
 
 传统的打包工具如`Webpack`是先解析依赖、打包构建再启动开发服务器，`Dev Server` 必须等待所有模块构建完成，当我们修改了 `bundle`模块中的一个子模块， 整个 `bundle` 文件都会重新打包然后输出。项目应用越大，启动时间越长。
 
 ![esbuild](./images/bundle.png)
 
-### vite是怎么做的
+## vite是怎么做的
 
 Vite 通过在一开始将应用中的模块区分为 **依赖** 和 **源码** 两类，改进了开发服务器启动时间。
 
@@ -44,30 +44,98 @@ Vite 以 [原生 ESM](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Gu
 
 
 
-## 前置知识
+## ESM
 
-### ESM
+在了解Vite之前，需要先了解下ESM，不同于之前的CJS，AMD，CMD等等，ESM提供了更原生以及更动态的模块加载方案，最重要的就是它是浏览器原生支持的，也就是说我们可以直接在浏览器中去执行import，动态引入我们需要的模块，而不是把所有模块打包在一起。
+
+### 使用方式
+
+```html
+<script type="module">
+  import message from './message.js'
+  console.log(message) // hello world
+</script>
+```
+
+也就是说 浏览器可以通过 `<script type="module">` 的方式和 import 的方式加载标准的 ES 模块 
+
+###### 而且 模块只会执行一次并且默认为defer也支持async
+
+传统的`<script>`如果引入的JS文件地址是一样的，则JS会执行多次。但是，对于`type="module"`的`<script>`元素，即使模块地址一模一样，也只会执行一次。例如：
+
+```html
+<!-- 1.mjs只会执行一次 -->
+<script type="module" src="1.mjs"></script>
+<script type="module" src="1.mjs"></script>
+<script type="module">import "./1.mjs";</script>
+<!-- 下面传统JS引入会执行2次 -->
+<script src="2.js"></script>
+<script src="2.js"></script>
+```
+
+## esbuild
+
+Vite底层使用Esbuild实现对`.ts、jsx、.js`代码文件的转化，所以先看下什么是es-build。
 
 
 
+esbuild 号称是新一代的打包工具，提供了与`Webpack`、`Rollup`、`Parcel` 等工具相似的资源打包能力，但在时速上达到10～100倍的差距，耗时是`Webpack`2%~3%
 
-
-
-
-### esbuild
-
-这是`Esbuild`首页的图。新一代的打包工具，提供了与`Webpack`、`Rollup`、`Parcel` 等工具相似的资源打包能力，但在时速上达到10～100倍的差距，耗时是`Webpack`2%~3%
+这是`Esbuild`首页的对比图。
 
 ![esbuild](./images/esbuild.png)
 
+`为啥这么快`
 
 
-#### 为啥这么快
 
-* 大多数前端打包工具都是基于 `JavaScript` 实现的，大家都知道`JavaScript`是解释型语言，边运行边解释。而 `Esbuild` 则选择使用 `Go` 语言编写，该语言可以编译为原生代码,在编译的时候都将语言转为机器语言，在启动的时候直接执行即可，在 `CPU` 密集场景下，`Go` 更具性能优势。
-* `JavaScript` 本质上是一门单线程语言，直到引入 `WebWorker` 之后才有可能在浏览器、`Node` 中实现多线程操作。而`GO`天生的多线程优势，可以充分利用 `CPU` 资源
+大多数前端打包工具都是基于 `JavaScript` 实现的，大家都知道`JavaScript`是解释型语言，边运行边解释。而 `Esbuild` 则选择使用 `Go` 语言编写，该语言可以编译为原生代码,在编译的时候都将语言转为机器语言，在启动的时候直接执行即可，在 `CPU` 密集场景下，`Go` 更具性能优势。
 
-### roolup
+
+
+`为啥需要预编译`
+
+
+
+依赖预编译，其实是 Vite 2.0 在为用户启动开发服务器之前，先用 `esbuild` 把检测到的依赖预先构建了一遍。
+
+也许你会疑惑，不是一直说好的 no-bundle 吗，怎么还是走启动时编译这条路线了？
+
+以导入 `lodash-es` 这个包为例。当你用 `import { debounce } from 'lodash'` 导入一个命名函数的时候，
+
+可能你理想中的场景就是浏览器去下载只包含这个函数的文件。但其实没那么理想，`debounce` 函数的模块内部又依赖了很多其他函数，形成了一个依赖图。
+
+当浏览器请求 `debounce` 的模块时，又会发现内部有 2 个 `import`，再这样延伸下去，这个函数内部竟然带来了 600 次请求，耗时会在 1s 左右。
+
+
+
+![](./images/down-b.png)
+
+
+
+再有就是去做模块化的兼容，对 `CommonJS` 模块进行分析，方便后面需要统一处理成浏览器可以执行的 `ES Module`。
+
+## roolup
+
+在生产环境下，Vite使用`Rollup`来进行打包
+
+
+
+`Rollup`是基于`ESM`的JavaScript打包工具。它将小文件打包成一个大文件或者更复杂的库和应用，打包既可用于浏览器和Node.js使用。 Rollup最显著的地方就是能让打包文件体积很小。相比其他JavaScript打包工具，Rollup总能打出更小，更快的包。因为`Rollup`基于`ESM`，比Webpack和Browserify使用的CommonJS模块机制更高效。
+
+
+
+## vite原理
+
+核心原理
+
+拦截浏览器对模块的请求并返回处理后的结果
+
+浏览器发起的第一个请求自然是请求 `localhost:3000/`，这个请求发送到 Vite 后端之后经过静态资源服务器的处理，会进而请求到 `index.html`，此时 Vite 就开始对这个请求做拦截和处理了。
+
+
+
+
 
 
 
@@ -128,6 +196,20 @@ export default function CommandSetEnv(options: Options) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+[可以借鉴 预编译的部分 https://juejin.cn/post/6932367804108800007](https://juejin.cn/post/6932367804108800007) 
+
+[webpack 的 scope hoisting 是什么？](https://segmentfault.com/a/1190000018220850)
 
 
 
